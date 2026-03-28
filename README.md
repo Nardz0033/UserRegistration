@@ -1,4 +1,4 @@
-Tske Note:
+Take Note:
 This project was entirely developed on a mobile phone using Termux.
 MariaDB - Database used in Termux 
 
