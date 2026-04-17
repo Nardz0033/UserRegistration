@@ -1,8 +1,7 @@
 <?php
 
-// logout.php
-session_start();
+require_once __DIR__ . '/includes/config.php';
+session_init();
 session_unset();
 session_destroy();
-header('Location: index.php');
-exit();
+redirect('login.php');

@@ -1,69 +1,95 @@
 <?php
-include('nav.php');
 
-$error = '';
+require_once __DIR__ . '/includes/config.php';
+session_init();
+
+if (is_logged_in()) {
+    redirect('index.php');
+}
+
+$error   = '';
 $success = '';
-$temp_password = '';
 
-if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    require('includes/mysqli_connect.php');
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    verify_csrf();
 
-    $email = mysqli_real_escape_string($dbc, $_POST['email']);
+    $email = trim($_POST['email'] ?? '');
 
-    $query = "SELECT user_id FROM users WHERE email='$email'";
-    $result = mysqli_query($dbc, $query);
-
-    if ($result && mysqli_num_rows($result) == 1) {
-        $row = mysqli_fetch_assoc($result);
-        $user_id = $row['user_id'];
-
-        $temp_password = substr(md5(uniqid(rand(), true)), 0, 8);
-        $hashed_password = sha1($temp_password);
-
-        $update = "UPDATE users SET pass='$hashed_password' WHERE user_id='$user_id'";
-        if (mysqli_query($dbc, $update)) {
-            $success = "Your password has been reset successfully!";
-        } else {
-            $error = "Database update failed. Please try again.";
-        }
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $error = 'Please enter a valid email address.';
     } else {
-        $error = "No user found with that email address.";
+        $dbc  = get_db();
+        $stmt = $dbc->prepare('SELECT user_id FROM users WHERE email = ?');
+        $stmt->bind_param('s', $email);
+        $stmt->execute();
+        $stmt->store_result();
+
+        if ($stmt->num_rows === 1) {
+            $stmt->bind_result($user_id);
+            $stmt->fetch();
+            $stmt->close();
+
+            $token   = bin2hex(random_bytes(32));
+            $expires = date('Y-m-d H:i:s', time() + 3600);
+
+            $upd = $dbc->prepare(
+                'UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE user_id = ?'
+            );
+            $upd->bind_param('ssi', $token, $expires, $user_id);
+            $upd->execute();
+            $upd->close();
+
+            $reset_link = BASE_URL . 'reset_password.php?token=' . urlencode($token);
+            $success = 'A password reset link has been generated. In a live environment this would be emailed to you.';
+
+            if (($_SESSION['user_level'] ?? '') === 'admin') {
+                $success .= '<br><strong>Reset link (dev only):</strong> <a href="' . h($reset_link) . '">' . h($reset_link) . '</a>';
+            }
+        } else {
+            $stmt->close();
+            $success = 'If that email is registered, a reset link will be sent.';
+        }
     }
 }
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forgot Password &mdash; <?= SITE_NAME ?></title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<?php include 'nav.php'; ?>
+<main>
+    <div class="card card-sm">
+        <h1>Forgot Password</h1>
 
-	                    	                                                	                    	                        	            <!DOCTYPE html>
-	                    	                                                	                    	                        	            <html lang="en">
-	                    	                                                	                    	                        	            <head>
-	                    	                                                	                    	                        	                <meta charset="UTF-8">
-	                    	                                                	                    	                        	                    <title>Forgot Password</title>
-                                                                                                                                              <link rel="stylesheet" href="style.css">
-	                    	                                                	                    	                        	                    </head>
-	                    	                                                	                    	                        	                    <body>
+        <?php if ($error): ?>
+            <div class="alert alert-error"><p><?= h($error) ?></p></div>
+        <?php endif; ?>
 
-	                    	                                                	                    	                        	                    <h1>Forgot Password</h1>
+        <?php if ($success): ?>
+            <div class="alert alert-success"><p><?= $success ?></p></div>
+            <p class="form-footer"><a href="login.php">&larr; Back to Login</a></p>
+        <?php else: ?>
+            <p class="form-description">Enter your email and we will send you a link to reset your password.</p>
 
-	                    	                                                	                    	                        	                    <?php if (!empty($error)) {
-	                    	                                                	                    	                        	                        echo "<p style='color:red;'>$error</p>";
-	                    	                                                	                    	                        	                    } ?>
+            <form action="forgot_password.php" method="post" novalidate>
+                <input type="hidden" name="csrf_token" value="<?= h(csrf_token()) ?>">
 
-	                    	                                                	                    	                        	                    <?php if (!empty($success)): ?>
-	                    	                                                	                    	                        	                        <p style="color:green;"><?php echo $success; ?></p>
-	                    	                                                	                    	                        	                            <p><strong>Temporary password:</strong> <?php echo $temp_password; ?></p>
-	                    	                                                	                    	                        	                                <p>Use this password to <a href="login.php">login</a> now. Once logged in, you may change it.</p>
-	                    	                                                	                    	                        	                                <?php else: ?>
-	                    	                                                	                    	                        	                                    <form action="forgot_password.php" method="post">
-	                    	                                                	                    	                        	                                            <label>Email Address:</label><br>
-	                    	                                                	                    	                        	                                                    <input type="email" name="email" required><br><br>
-	                    	                                                	                    	                        	                                                            <button type="submit">Reset Password</button>
-	                    	                                                	                    	                        	                                                                </form>
-	                    	                                                	                    	                        	                                                                <?php endif; ?>
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" name="email" required autofocus>
+                </div>
 
-	                    	                                                	                    	                        	                                                                <p><a href="login.php">Login</a> | <a href="register.php">Register</a> | <a href="index.php">Home</a></p>
+                <button type="submit" class="btn">Send Reset Link</button>
+            </form>
 
-	                    	                                                	                    	                        	                                                                </body>
-	                    	                                                	                    	                        	                                                                </html>
-	                    	                                                	                    	                        
-	                    	                                                	                    
-	                    	                                                
-	                   
+            <p class="form-footer"><a href="login.php">&larr; Back to Login</a></p>
+        <?php endif; ?>
+    </div>
+</main>
+</body>
+</html>
